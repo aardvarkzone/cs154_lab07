@@ -11,15 +11,56 @@ pyrtl.core.set_debug_mode()
 fetch_pc = pyrtl.Input(bitwidth=32, name='fetch_pc') # current pc in fetch
 
 update_prediction = pyrtl.Input(bitwidth=1, name='update_prediction') # whether to update prediction
-update_branch_pc = pyrtl.Input(bitwidth=32, name='update_branch_pc') # previous pc (in decode/execute)
+update_branch_pc = pyrtl.Input(bitwidth=32, name='update_branch_pc') # previous pc (in decode/execute) - prev branch pc 
 update_branch_taken = pyrtl.Input(bitwidth=1, name='update_branch_taken') # whether branch is taken (in decode/execute)
+
+current = pyrtl.WireVector(bitwidth=3, name='current index')
+past = pyrtl.WireVector(bitwidth=3, name='past index')
+
+past <<= update_branch_pc[2:5]
+current <<= fetch_pc[2:5]
 
 # Outputs
 pred_taken = pyrtl.Output(bitwidth=1, name='pred_taken')
 
-pred_state = pyrtl.MemBlock(...
+pred_state = pyrtl.MemBlock(bitwidth=2, addrwidth=3, name='block', max_read_ports= 20, max_write_ports=20, asynchronous=True)
+new_pred_state = pyrtl.WireVector(bitwidth=2, name="new_pred_state")
+
+# new_pred_state keeps track of the previous 
+# make a prediction, update BHT (pred_state) for the previous branch, update new_pred_state for the next branch every cycle 
 
 # Write your BHT branch predictor here
+# step one: make a prediction 
+# pred_taken <<= pyrtl.select(update_prediction, pred_state[current], pred_state[past])
+with pyrtl.conditional_assignment: 
+    with ((update_prediction == 1) & (past == current)):
+            pred_taken |= new_pred_state[1]
+        # with pyrtl.otherwise:
+        #     pred_taken |= pred_state[past][1]
+    with pyrtl.otherwise:
+        pred_taken |= pred_state[current][1]
+
+# step 2: update BHT (pred_state) for the previous branch
+with pyrtl.conditional_assignment:
+    with (update_prediction == 1):
+        pred_state[past] |= new_pred_state
+
+# step 3: update new_pred_state for the next branch
+with pyrtl.conditional_assignment:
+    with (update_prediction == 1) & (update_branch_taken == 1):
+        with (pred_state[past] == 0b11):
+            new_pred_state |= 0b11
+        with (pyrtl.otherwise):
+            new_pred_state |= pred_state[past] + 1
+    with (update_prediction == 1) & ~(update_branch_taken == 1):
+        with (pred_state[past] == 0b00):
+            new_pred_state |= 0b00
+        with (pyrtl.otherwise):
+            new_pred_state |= pred_state[past] - 1
+    with pyrtl.otherwise:
+        new_pred_state |= pred_state[past]
+
+
 
 #Testing
 if __name__ == "__main__":
@@ -31,7 +72,7 @@ if __name__ == "__main__":
     predictionPrevious = 0
     count = 0
     correct = 0
-    f = open("demo_trace.txt", "r")  # Edit this line to change the trace file you read from
+    f = open("alternate_trace.txt", "r")  # Edit this line to change the trace file you read from
     for iteration,line in enumerate(f): # Read through each line in the file
         pcCurrent = int(line[0:line.find(':')],0) # parse out current pc
         branchTakenCurrent = int(line[12]) # parse out branch taken
@@ -65,4 +106,4 @@ if __name__ == "__main__":
         count += 1
 
     print("Accuracy = ", correct/count)
-    sim_trace.render_trace()
+    #sim_trace.render_trace()
